@@ -1,0 +1,1253 @@
+<?php
+// $Id$
+
+/**
+ * 定义搜索组
+ * @Implement of hook_solr_search_group()
+ */
+function solr_solr_search_group() {
+  // 小组话题搜索
+  if (module_exists('og')) {
+    $groups = array();
+    $groups['og_node'] = array(
+      'service' => 'http://localhost:8983/solr/og_node', // solr 服务地址，可在管理中设置
+      'title' => '小组话题',
+      'page_title' => '小组话题搜索',
+      'is_html' => false, // 提交到 solr 的文本是否保留 html，若为 false，将自动过滤
+      'is_format' => true, // 提交到 solr 的文本是否先进行格式化处理，建议设为 true，否则请自行检查
+      'description' => '索引小组话题',
+      /**
+       * 预处理查询关键词，即通过  getKeywords 将用户输入分词
+       */
+      'query_keywords' => true, 
+      'fields' => array( // 索引字段定义
+        'id' => 'nid', // 话题 nid
+        'oid' => '小组 id',
+        'og_name' => '小组名称',
+        'uid' => '话题作者 id',
+        'comment_count' => '回复数量',
+        'created' => '创建时间',
+        'updated' => '更新时间',
+        'title' => '标题',
+        'username' => '用户昵称',
+        'body' => '话题内容',
+        'comment' => '评论内容，多值',
+        'node_type' => '话题类型',
+      )
+    );
+    return $groups;
+  }
+}
+
+class Solr {
+  
+  /**
+   * solr 服务地址，如 http://localhost:8983/solr
+   */
+  protected $_service;
+  
+  /**
+   * 连接超时时间
+   */
+  protected $_timeout;
+  
+  /**
+   * 搜索组的详细信息，定义组内的字段等信息
+   */
+  protected $_groupInfo;
+
+  // 查询时最终提交的查询参数
+  public $queryData;
+  
+  /**
+   * 构造函数
+   * @param (string) $searchGroup
+   *  组标识
+   * @param (int) $timeout
+   *  默认超时时间
+   */
+  public function __construct($searchGroup, $timeout = NULL) {
+    /**
+     * 分组标识由模块定义，在 hook_solr_search_group() 中实现
+     */
+    if (!$this->_groupInfo = solr_get_search_group($searchGroup)) {
+      throw new Exception('未定义的分组');   
+    }
+    
+    // solr 服务地址，必须先添加 solr 配置文件
+    if ($service = var_get_key('solr', 'service_' . $searchGroup, $this->_groupInfo['service'])) {
+      $this->setService($service);
+    } else {
+      throw new Exception('请提供 solr 服务地址');   
+    }
+    
+    // 超时时间
+    if (!empty($timeout)) {
+      $this->_timeout = $timeout;
+    } else if (!empty($this->_groupInfo['timeout'])) {
+      $this->_timeout = $this->_groupInfo['timeout'];
+    } else {
+      $this->_timeout = 30;
+    }
+    
+  }
+  
+  /**
+   * 测试 solr 服务是否可用
+   * @param (int) $timeout
+   *  超时时间。通常 solr 运行在本机，响应时间一般在 1 秒之内，所以默认为 2 秒
+   */
+  public function ping($timeout = 2) {
+    $result = dd_http_request($this->_service . '/admin/ping?wt=json', NULL, 'GET', NULL, 0, $timeout);
+    
+    if ($result->code == 200) {
+      return json_decode($result->data);
+    } else {
+      dd_set_message(t('solr', '无法连接 solr'), 'error');
+      return false;
+    }
+    
+  }
+  
+  /**
+   * 添加数据源
+   * @param (array) $parts
+   *  数据源，以 id 为键名的数组，id 将作为索引的主记录
+   *  id 可为数值或字符串，在当前搜索类型中，不允许重复。结构如：
+   *    array(
+   *      10 => array(
+   *        'attributes' => array('boost' => 2.5), // 属性值
+   *        'items' => array(
+   *          'title' => 'abc',
+   *          'body' => 'test test',
+   *          'term' => array(
+   *            'data' => 12,
+   *            'attributes' => array('overwrite' => 'true'), // 属性值
+   *          )
+   *        )
+   *      ),
+   *    )
+   * @param (bool) $commit
+   *  索引是否立即生效
+   */
+  public function update($parts = array(), $commit = true) {
+    $source = '<add>';
+    $keys = $this->_groupInfo['fields'];
+    unset($keys['id']);
+    
+    foreach ($parts as $id => $fields) {
+      if (!isset($fields['items'])) {
+        continue;
+      }
+      
+      if (!isset($field['attributes'])) {
+        $source .= '<doc>';
+      } else {
+        $source .= '<doc'.dd_attributes($field['attributes']).'>';
+      }
+      
+      // 主记录 id 
+      $source .= '<field name="id">' . $id . '</field>';
+      
+      foreach ($fields['items'] as $key => $value) {
+        // 未定义的字段 
+        if (empty($keys[$key])) continue;
+        if (is_array($value) || is_object($value)) {
+
+          // 序列化存储
+          if (is_array($keys[$key]) && !empty($keys[$key]['serialize'])) {
+            $source .= '<field name="' . $key . '">' . serialize($value) . '</field>';
+            continue;
+          }
+          
+          if (is_object($value)) $value = (array) $value;
+
+          if (isset($value['data'])) {
+            $source .= '<field name="'.$key;
+            if (isset($value['attributes'])) {
+              $source .= dd_attributes($value['attributes']);
+            }
+
+            $source .= '>' . $this->formatText($value['data']) . '</field>';
+          } else {
+            foreach ($value as $muti) {
+              $source .= '<field name="'.$key.'">' . $this->formatText($muti) . '</field>';
+            }
+          }
+        } else {
+          $source .= '<field name="'.$key.'">' . $this->formatText($value) . '</field>';
+        }
+      }
+      $source .= '</doc>';
+    }
+    
+    $source .= '</add>';
+    
+    $headers = array(
+      'Content-Type' => 'text/xml; charset=utf-8'
+    );
+    
+    $result = dd_http_request($this->_service  . '/update?wt=json', $source, 'POST', $headers);
+    if ($result->code == 200) {
+      if ($commit) {
+        $this->commit();
+      }
+      return json_decode($result->data);
+    }
+    
+    return false;
+  }
+  
+  /**
+   * 确认提交，使之前提交的数据源生效
+   * @link http://wiki.apache.org/solr/UpdateXmlMessages#Optional_attributes_for_.22commit.22_and_.22optimize.22
+   * @param (bool) $waitFlush
+   * @param (bool) $waitSearcher
+   * @param (bool) $expungeDeletes
+   * @return (false or object)
+   */
+  public function commit($waitFlush = true, $waitSearcher = true, $expungeDeletes = false) {
+    $waitFlush = $waitFlush ? 'true' : 'false';
+    $waitSearcher = $waitSearcher ? 'true' : 'false';
+    $expungeDeletes = $expungeDeletes ? 'true' : 'false';
+    $data = '<commit waitFlush="'.$waitFlush.'" waitSearcher="'.$waitSearcher.'" expungeDeletes="'.$expungeDeletes.'"/>';
+    
+    $result = dd_http_request($this->_service . '/update?wt=json', $data, 'POST', 
+      array('Content-Type' => 'text/xml; charset=utf-8')
+    );
+    
+    if ($result->code == 200) {
+      // @TODO solr 3.5 弃用了这个方法，待修改
+      //$this->optimize();
+      return json_decode($result->data);
+    }
+    
+    return false;
+  }
+  
+  /**
+   * 优化索引
+   * @link http://wiki.apache.org/solr/UpdateXmlMessages#Optional_attributes_for_.22commit.22_and_.22optimize.22
+   * @param (bool) $waitFlush
+   * @param (bool) $waitSearcher
+   * @param (int) $maxSegments
+   * @return (false or object)
+   */
+  public function optimize($waitFlush = true, $waitSearcher = true, $maxSegments = 1) {
+    $waitFlush = $waitFlush ? 'true' : 'false';
+    $waitSearcher = $waitSearcher ? 'true' : 'false';
+    $data = '<optimize waitFlush="'.$waitFlush.'" waitSearcher="'.$waitSearcher.'" maxSegments="'.$maxSegments.'"/>';
+    
+    $result = dd_http_request($this->_service . '/update?wt=json', $data, 'POST',
+      array('Content-Type' => 'text/xml; charset=utf-8')
+    );
+    
+    if ($result->code == 200) {
+      return json_decode($result->data);
+    }
+    
+    return false;
+  }
+  
+  /**
+   * 回滚到上次提交之前
+   * @return (false or object)
+   */
+  public function rollback() {
+
+    $data = '<rollback/>';
+    
+    $result = dd_http_request($this->_service . '/update?wt=json', $data, 'POST',
+      array('Content-Type' => 'text/xml; charset=utf-8')
+    );
+    
+    if ($result->code == 200) {
+      return json_decode($result->data);
+    }
+    
+    return false;
+  }
+  
+  /**
+   * 执行一个  solr 查询
+   * @param (string or array) $query
+   *  查询相关参数
+   */
+  public function query($query = NULL, $method = 'GET') {
+    $data = array();
+    $rows = 10;
+   
+    if (isset($query)) {
+      if (is_array($query)) {
+        
+        foreach ($query as $key => $value) {
+          if (is_numeric($key)) {
+            continue;
+          } else if (is_array($value)) {
+            $ks = array();
+            
+            foreach ($value as $k) {
+              $ks[] = $key . '=' . urlencode($k); 
+            }
+            
+            $data[$key] = implode('&', $ks);
+            
+          } else {
+            
+            if ($key == 'q') {
+              $data['q'] .= 'q='.urlencode($value);
+            } else if ($key == 'rows') {
+              
+              if (is_numeric($value)) {
+                $rows = floor($value);
+              }
+              
+            } else {
+              $data[$key] = $key .'='. urlencode($value);
+            }
+            
+          }
+        }
+        
+      } else if (is_string($query)) {
+        
+        $data['q'] .= 'q='.urlencode($query);
+        
+      } else {
+        
+        dd_set_message(t('solr', '无效的查询'), 'error');
+        return false;
+        
+      }
+      
+    }
+    
+    // 若未指明类型，则默认为 json
+    if (empty($data['wt'])) {
+      $data['wt'] = 'wt=json';
+    }
+    
+    /**
+     * 
+     * 若是 json，返回 map
+     * @link http://wiki.apache.org/solr/SolJSON#JSON_specific_parameters
+     */
+    if (empty($data['json.nl'])) {
+      $data['json.nl'] = 'json.nl=map';
+    }
+    
+    // 若未指明字段，则获取该组定义的全部字段
+    if (empty($data['fl'])) {
+      $data['fl'] = 'fl=' . implode(',', array_keys($this->_groupInfo['fields'])) . ',score';
+    }
+    
+    $data['rows'] = 'rows=' . $rows;
+    
+    if (!isset($data['start']) && !empty($_GET['page'])) {
+      $data['start'] = 'start=' . ($_GET['page']*$rows);
+    }
+
+    // 最终查询参数
+    $this->queryData = $data;
+
+    if ($method == 'GET') {
+      $result = dd_http_request($this->_service . '/select?' . implode('&', $data), NULL, 'GET');
+    } else {
+      $result = dd_http_request($this->_service . '/select', implode('&', $data), 'POST');
+    }
+    
+    if ($result->code == 200) {
+      if ($data['wt'] == 'wt=json') {
+        return json_decode($result->data);
+      } else {
+        return $result->data;
+      }
+    }
+   
+    return false;
+  }
+  
+  /**
+   * 按 id 删除
+   * @link http://wiki.apache.org/solr/UpdateXmlMessages#A.22delete.22_by_ID_and_by_Query
+   * @param (string or array) $id
+   *  待删除记录的 id 值，一条或多条，多条以数组形式传递
+   * @param (bool) $commit
+   *  使删除立即生效
+   * @return (false or object)
+   */
+  public function deleteId($ids, $commit = true) {
+    // 附加站点、分组前缀
+    
+    $data = '<delete>';
+    
+    if (is_array($ids)) {
+      foreach ($ids as $id) {
+        $data .= '<id>' . $id . '</id>';
+      }
+    } else {
+      $data .= '<id>' . $ids . '</id>';
+    }
+    
+    $data .='</delete>';
+    
+    $result = dd_http_request($this->_service . '/update?wt=json', $data, 'POST',
+      array('Content-Type' => 'text/xml; charset=utf-8')
+    );
+    
+    if ($result->code == 200) {
+      if ($commit) {
+        $this->commit();
+      }
+      return json_decode($result->data);
+    }
+    
+    return false;
+  }
+  
+  /**
+   * 按查询结果集删除
+   * @param (string or array) $query
+   *  查询表达式，一个或多个
+   * @return (false or object)
+   */
+  public function deleteQuery($query, $commint = true) {
+    $data = '<delete>';
+    
+    if (is_string($query)) {
+      $data .= '<query>' . $query . '</query>';
+    } else if (is_array($query)) {
+      foreach ($query as $value) {
+        $data .= '<query>' . $value . '</query>';
+      }
+    }
+    
+    $data .= '</delete>';
+    
+    $result = dd_http_request($this->_service . '/update?wt=json', $data, 'POST',
+      array('Content-Type' => 'text/xml; charset=utf-8')
+    );
+    
+    if ($result->code == 200) {
+      if ($commit) {
+        $this->commit();
+      }
+      return json_decode($result->data);
+    }
+    
+    return false;
+  }
+  
+  /**
+   * 删除该组所有索引
+   */
+  public function deleteAll() {
+    
+    $data = '<delete><query>id:*</query></delete>';
+    
+    $result = dd_http_request($this->_service . '/update?wt=json', $data, 'POST',
+      array('Content-Type' => 'text/xml; charset=utf-8')
+    );
+    
+    if ($result->code == 200) {
+      $this->commit();
+      return json_decode($result->data);
+    }
+    
+    return false;
+    
+  }
+  
+  /**
+   * 设置 solr 服务地址
+   * @param (string) $service
+   */
+  public function setService($service) {
+    $this->_service = $service;
+  }
+  
+  /**
+   * 获取 solr 服务地址
+   */
+  public function getService() {
+    return $this->_service;
+  }
+
+  /**
+   * 格式化处理
+   * @param string $text
+   * 	待处理的字符串
+   * @return string
+   */
+  public function formatText($text) {
+
+    if (empty($this->_groupInfo['is_format'])) return htmlspecialchars($text, ENT_QUOTES, 'UTF-8');
+
+    //$text = str_replace(array("\n", "\t", "\r", "\t", "\v", ' ', '　'), '', $text);
+    
+    $text = preg_replace_callback('/\[code.*?\](.*)?\[\/code\]/ims', 'solr_code_tags_format', $text);
+
+    if (empty($this->_groupInfo['is_html'])) {
+      $text = strip_tags($text);
+    }
+    
+    $text = htmlspecialchars($text, ENT_QUOTES, 'UTF-8');
+    $text = preg_replace('@[\x00-\x08\x0B\x0C\x0E-\x1F]@', ' ', $text);
+    
+    return $text;
+  }
+
+  /**
+   * 将查询关键词过滤中的 : - ! ( 等符号转换为空格
+   * @param string $text
+   * @static
+   * @access public
+   * @return string
+   */
+  static function wordSpaces($text) {
+    return str_replace(array(':', '-', '!', '(', ')', '.'), ' ', $text);
+  }
+
+  /**
+   * 将字符串分词
+   * 必须使用 IKTokenizer 配置一个中文分词 analysis 服务，fieldtype 为 getKeywords
+   * @param (string) $text
+   * 	待解析的字符串
+   * @param (int) $array
+   * 	若为 0，则返回字符串，反之，返回 solr 原始数据
+   * @return (string|array) 以空格分隔的字符串，或数组
+   */
+  static function getKeywords($text, $array = 0) {
+    // http://localhost:8983/solr/ognode/analysis/field
+    if (!$service = var_get_key('solr', 'keywords_service')) {
+      dd_set_message(t('solr', '请配置分词接口'), 'error');
+      return;
+    }
+    
+    static $datas;
+    
+    if (isset($datas[$text])) {
+      return $datas[$text][$array];
+    }
+    
+    $args = array(
+      'wt' => 'json',
+      'analysis.fieldtype' => 'getKeywords',
+      'json.nl' => 'map',
+      'q' => $text
+    );
+    
+    $datas[$text] = array('', '');
+    
+    $result = dd_http_request($service, $args);
+    
+    if ($result->code == 200) {
+      $json = json_decode($result->data);
+      if (!empty($json->analysis->field_types->getKeywords->query) && 
+      !empty($json->analysis->field_types->getKeywords->query->{'org.wltea.analyzer.lucene.IKTokenizer'})) {
+        $datas[$text][1] = $json->analysis->field_types->getKeywords->query->{'org.wltea.analyzer.lucene.IKTokenizer'};
+        $datas[$text][0] = '';
+        foreach ($datas[$text][1] as $o) {
+          $datas[$text][0] .= $o->text . ' ';
+        }
+      }
+    }
+    
+    return $datas[$text][$array];
+  }
+  
+}
+
+/**
+ * 根据 id 更新一条记录 
+ * @param string $id 
+ *  记录主 id
+ * @param object|array $doc 
+ *  待更新的记录
+ * @param bool $commit 
+ *  是否使更新立即生效
+ * @access public
+ * @return bool|object
+ */
+function solr_update_by_id($group, $id, $doc, $commit = true) {
+  if (is_object($doc)) $doc = (array) $doc;
+
+  if ($o = solr_query_by_id($group, $id, 1)) {
+    $doc = array_merge((array) $o, $doc);
+  }
+  
+  $doc['id'] = $id;
+
+  $data = array($id => array('items' => $doc));
+
+  $api = new Solr($group);
+  return $api->update($data, $commit);
+}
+
+/**
+ * 根据 id 读取一条记录 
+ * @param string $id 
+ * @access public
+ * @return object
+ */
+function solr_query_by_id($group, $id, $clear = false) {
+  static $data;
+
+  if ($clear || !isset($data[$group][$id])) {
+    $data[$group][$id] = false;
+    $api = new Solr($group);
+    $result = $api->query(array('q' => 'id:' . $id, 'rows' => 1, 'start' => 0));
+    if (!empty($result->response->numFound)) {
+      $data[$group][$id] = $result->response->docs[0];     
+    }
+  }
+  
+  return $data[$group][$id];
+}
+
+
+/**
+ * @Implement of hook_solr_search_default_view()
+ * 搜索页面默认显示内容，可使用 hook_solr_search_default_view() 定义
+ * 若未实现本接口，则为空
+ * 
+ * @param (string) $group
+ *  分组名称
+ * @return (string) 输出到页面
+ */
+function solr_solr_search_default_view($group) {
+  // 示例
+  if ($group == 'og_node') {
+    
+    // $output = t('solr', '请输入关键词以搜索');
+    
+    // return $output;
+  }
+}
+
+/**
+ * @Implement of hook_solr_search_form()
+ * 
+ * 自定义搜索表单，默认有关键词和提交两个字段，可根据不同搜索类型自行添加
+ * @param (string) $group
+ *  组标识
+ * @param (array) & $form
+ *  搜索表单，必须是 args 单元下的字段才会被发送到 GET 请求中
+ * @param (array) $value
+ *  当前参数值
+ */
+function solr_solr_search_form($group, &$form, $value = array()) {
+  switch ($group) {
+    case 'og_node':
+      $form['fields']['args']['fields'] = array(
+        '#type' => 'select',
+        '#title' => '',
+        '#default_value' => $value['fields'],
+        '#options' => array(
+          t('solr', '全部'),
+          'title' => t('solr', '标题'),
+          'body' => t('solr', '正文'),
+          'comment' => t('solr', '评论'),
+          'user' => t('solr', '作者'),
+        )
+      );
+    break;
+      
+  }
+}
+
+/**
+ * @Implement of hook_solr_search_sort()
+ * 
+ * 获得排序链接，若不需要排序，可不实现这个接口
+ * 默认按 solr 内部相关度排序
+ * 
+ * @param (string) $group
+ *  分组标识
+ * @return (string)
+ *  
+ */
+function solr_solr_search_sort($group) {
+  switch ($group) {
+    case 'og_node':
+      // key 为用做排序的字段名称
+      $sort = array(
+        'score' => array('data' => t('solr', '默认'), 'sort' => 'desc'),
+        'created' => t('solr', '发布时间'),
+        'updated' => t('solr', '更新时间'),
+        'comments' => t('solr', '评论数量'),
+      );
+    return dd_get_sort_link($sort);
+  }
+}
+
+/**
+ * @Implement of hook_solr_search_query()
+ * 
+ * 解析查询参数，可根据搜索分组，修正或添加不同的查询参数
+ * 
+ * @param (string) $group
+ *  组标识
+ * @param (array) & $query
+ *  通常是用户输入的参数，即 $_GET，将做为最终提交到 solr 中查询的参数
+ *  
+ */
+function solr_solr_search_query($group, &$query) {
+  switch ($group) {
+    case 'og_node':
+      $query['hl'] = 'true';
+      $query['hl.fl'] = 'title,comment,body';
+      $query['f.comment.hl.fragsize'] = 250;
+      $query['f.body.hl.fragsize'] = 250;
+      
+      if (isset($query['ext_sort']) && isset($query['ext_order']) 
+      && in_array($query['ext_order'], array('asc', 'desc'))) {
+        switch ($query['ext_sort']) {
+          case 'created':
+            $query['sort'] = 'id ' . $query['ext_order'];
+          break;
+          case 'updated':
+            $query['sort'] = 'updated ' . $query['ext_order'];
+          break;
+          case 'comments':
+            $query['sort'] = 'comment_count ' . $query['ext_order'];
+          break;
+          case 'score':
+            $query['sort'] = 'score ' . $query['ext_order'];
+        }
+        
+        unset($query['ext_sort'], $query['ext_order']);
+      }
+      
+      if (isset($query['fields'])) {
+        
+        if ($query['fields'] == 'body') {
+          $query['q'] = 'body:' . $query['q'];
+        } else if ($query['fields'] == 'title') {
+          $query['q'] = 'title:' . $query['q'];
+        } else if ($query['fields'] == 'user') {
+          $query['q'] = 'username:' . $query['q'];
+        } else if ($query['fields'] == 'comment') {
+          $query['q'] = 'comment:' . $query['q'];
+        }
+        
+        unset($query['fields']);
+      }
+    break;
+  }
+}
+
+/**
+ * @Implement of hook_solr_search_item_view()
+ * 没有搜索结果时，可使用 hook_solr_search_no_result() 定义页面内容
+ * 若未实现本接口，则输出默认提示语
+ * 
+ * @param (string) $group
+ *  组标识
+ * @param (object) $result
+ *  solr 返回的对象
+ * @return (string) 输出到页面
+ */
+function solr_solr_search_no_result($group, $result) {
+  // 示例
+  if ($group == 'og_node') {
+    return system_no_content(t('solr', '没有匹配的记录，换个关键词试试'));
+  }
+}
+
+/**
+ * @Implement of hook_solr_search_item_view()
+ * 
+ * 输出搜索结果数据，该接口使用 module_invoke() 触发
+ * 所以，如果希望其它模块可以修改搜索结果，应自定义一个 hook
+ * 
+ * @param (string) $group
+ *  组标识
+ * @param (object) $doc
+ *  一条搜索结果记录，由 solr 提供
+ *  
+ * @return (array or string)
+ *  可以返回一个字符串，接口不做处理，直接输出。
+ *  或返回一个数组，结构必须固定，如：
+ *    array(
+ *      'title' => '我是一条记录', // 标题
+ *      'body' => '摘要摘要', // 摘要，建议控制在一定长度之内
+ *      'links' => '....', // 作者、出处等
+ *    )
+ */
+function solr_solr_search_view($group, $result) {
+  switch ($group) {
+    case 'og_node':
+      $att = array('html' => 1);
+      foreach ($result->response->docs as $doc) {
+        if (isset($result->highlighting->{$doc->id})) {
+          if (isset($result->highlighting->{$doc->id}->title)) {
+            $doc->ext_ts_title = $result->highlighting->{$doc->id}->title[0];
+          }
+          if (isset($result->highlighting->{$doc->id}->body)) {
+            $doc->body = $result->highlighting->{$doc->id}->body[0];
+          } else if (isset($result->highlighting->{$doc->id}->comment)) {
+            $doc->body = $result->highlighting->{$doc->id}->comment[0];
+            $att['fragment'] = 'og_node_comment_wrapper';
+          } else {
+            $doc->body = mb_substr($doc->body, 0, 150);
+          }
+        }
+        
+        $item = array(
+          '<h2 class="solr_search_item_title">' . l($doc->title, 'group/node/' . $doc->id, $att) . '</h2>'
+        );
+        
+        $item[] = '<div class="solr_search_item_body">' . $doc->body . '…</div>';
+        
+        $info = '小组：' . l($doc->og_name, 'group/' . $doc->oid);
+        $info .= '作者：' . l($doc->username, 'user/' . $doc->uid);
+        if ($doc->comment_count) {
+          $info .= '评论：' . l($doc->comment_count .' 条', 'group/node/' . $doc->id, array('fragment' => 'og_node_comment_wrapper'));
+        }
+        $info .= '时间：' . format_date($doc->updated);
+        
+        $item[] = '<div class="solr_search_item_links">' . $info . '</div>';
+        $output .= theme('item_list', $item);
+      }
+      
+    return $output;
+  }
+}
+
+/**
+ * 获取指定或全部搜索分组信息，触发 hook_solr_search_group()
+ * @param (string) $name
+ *  分组标识
+ * @param (bool) $clear
+ *  是否清除 hook 缓存
+ */
+function solr_get_search_group($name = NULL, $clear = false) {
+  if ($clear || !$groups = var_get('solr_search_group', false)) {
+    if ($datas = _module_invoke_all('solr_search_group')) {
+      foreach ($datas as $module => $data) {
+        foreach ($data as $key => $group) {
+          if (empty($group['title']) || !is_array($group['fields']) || empty($group['service'])) {
+            dd_set_message($key . ' 设置不正确，请参考 solr_solr_search_group()', 'error');
+          } else {
+            $groups[$key] = $group;
+            $groups[$key]['module'] = $module;
+          }
+        }
+      }
+      var_set('solr_search_group', $groups);
+    }
+  }
+  
+  if (isset($name)) {
+    if (isset($groups[$name])) {
+      return $groups[$name];
+    }
+  } else {
+    return $groups;
+  }
+  
+}
+
+/**
+ * 将 [code=()][/code] 之间的代码转义
+ * @param (array) $mat
+ */
+function solr_code_tags_format($mat) {
+  return htmlspecialchars($mat[1]);
+}
+
+/**
+ * @Implement of hook_solr_data_import()
+ * 
+ * 批量提交数据，以建立索引。该钩子由系统触发，属于被动提交，适合批量提交
+ * 但不建议一次提交过多，控制在 1000 之内为宜
+ * 模块可调用  solr::update 自动提交，比如在某个内容添加/更新成功后，主动提交到 solr
+ * 
+ * @param int $last_timestamp
+ *  上次执行时间，实际上是上次 cron 运行或手动触发提交的时间
+ * @param string $group
+ *  搜索组名
+ * @return array 按搜索分组标识返回符合 solr 规则的数据
+ */
+function solr_solr_data_import($last_timestamp, $group = NULL) {
+  
+  $data = array();
+  
+  if (module_exists('og')) {
+    // 获得上次提交信息，包括时间戳和最后一个 id
+    $last = solr_data_import_last_info('og_node');
+    
+    if ($fetch = db_query('SELECT u.name, n.*, o.og_name FROM {og} o INNER JOIN {og_node} n ON o.oid = n.oid 
+    INNER JOIN {users} u ON n.uid = u.uid WHERE n.nid > ? AND o.status > 0 AND o.type > 0 AND n.node_status > 0 
+    OR n.updated > ? ORDER BY n.nid ASC', array($last['id'], $last['timestamp']), array('limit' => 100))) {
+      $data['og_node'] = array();
+      
+      foreach ($fetch as $o) {
+        $data['og_node'][$o->nid]['items'] = array(
+          'body' => $o->body,
+          'node_type' => $o->node_type,
+          'oid' => $o->oid,
+          'og_name' => $o->og_name,
+          'uid' => $o->uid,
+          'username' => $o->name,
+          'comment_count' => $o->comment_count,
+          'created' => $o->created,
+          'updated' => $o->updated,
+          'title' => $o->title,
+        );
+        
+        if ($o->comment_count > 0) {
+          /**
+           * 每个话题下评论最多索引 100 条
+           * 评论实际单独索引，做为一个独立的分组更好
+           */
+          if ($comments = db_query('SELECT cid, body FROM {comment} WHERE ext_type = ? AND ext_id = ? 
+          AND status > 0 ORDER BY cid ASC', array('og', $o->nid), array('limit' => 1000))) {
+            foreach ($comments as $comment) {
+              $body = preg_replace_callback('/\[code.*?\](.*)?\[\/code\]/ims', 'solr_code_tags_format', $comment->body);
+              if ($body = strip_tags($body)) {
+                $body = str_replace(array("\n", "\t", "\r", "\t", "\v", '', '　'), '', $body);
+                $body = preg_replace(array('/\[comment.*?\]/i', '/\[smiley\].*?\[\/smiley\]/i'), '', $body);
+              }
+              
+              if (mb_strlen($body) > 6) {
+                // 过短的评论不索引
+                $data['og_node'][$o->nid]['items']['comment'][] = $body;
+              }
+              
+            }
+          }
+        }
+      }
+      
+    }
+  }
+  
+  return $data;
+}
+
+/**
+ * @Implement of hook_og_node_delete()
+ * 
+ * 实现接口，小组话题删除时，删除 solr 中的数据
+ */
+function solr_og_node_delete($node) {
+  $solr = new solr('og_node');
+  return $solr->deleteId($node->nid);
+}
+
+/**
+ * @Implement of hook_og_node_status()
+ * 
+ * 小组话题状态改变，若转移到回收站，则删除 solr 中的数据
+ */
+function solr_og_node_status($node) {
+  if ($node->node_status < 1) {
+    $solr = new solr('og_node');
+    return $solr->deleteId($node->nid);
+  }
+}
+
+/**
+ * @Implement of hook_system_cache_clear()
+ */
+function solr_system_cache_clear($op, $value = NULL) {
+  if ($op == 'submit' && !empty($value['value']['cache_hook'])) {
+    var_del('solr_search_group', 0);
+  }
+}
+
+/**
+ * @Implement of hook_menu()
+ */
+function solr_menu() {
+  $items = array();
+  
+  $items['search'] = array(
+    'page_callback' => 'solr_page_search',
+    'access_callback' => true,
+    'description' => '默认搜索页面',
+    'access_callback' => true,
+    'file' => 'solr.page.inc',
+  );
+  
+  $items['search/%'] = array(
+    'load_functions' => array(1 => '%'),
+    'page_callback' => 'solr_page_search',
+    'page_arguments' => array(1),
+    'access_callback' => 'solr_is_search_page',
+    'access_arguments' => array(1),
+    'description' => '分组搜索页面',
+    'file' => 'solr.page.inc',
+  );
+  
+  $items['admin/solr'] = array(
+    'title' => 'solr 设置',
+    'access_arguments' => array('admin search settings'),
+    'page_callback' => 'dd_get_form',
+    'page_arguments' => array('solr_admin_settings'),
+    'file' => 'solr.admin.inc',
+  );
+  
+  $items['admin/solr/index'] = array(
+    'title' => '索引任务',
+    'access_arguments' => array('admin search settings'),
+    'page_callback' => 'solr_admin_index',
+    'file' => 'solr.admin.inc',
+  );
+  return $items;
+}
+
+/**
+ * 验证用户是否有权限使用搜索
+ * @param (string) $group
+ *  搜索分组名称，若无，则为默认搜索
+ */
+function solr_is_search_page($group = NULL) {
+  if (!isset($group)) {
+    $group = var_get_key('solr', 'search_default', 'user');
+  }
+  
+  return user_access('solr search ' . $group . ' view') && solr_get_search_group($group);
+}
+
+/**
+ * @Implement of hook_prem()
+ */
+function solr_perm() {
+  $perms['admin solr settings'] = t('solr', 'solr 设置');
+  
+  foreach (solr_get_search_group() as $key => $group) {
+    $perms['solr search ' . $key . ' view'] = $group['title']; 
+  }
+  
+  return $perms;
+}
+
+/**
+ * @Implement of hook_system_admin_menus()
+ */
+function solr_system_admin_menus() {
+  return array(array(
+    array('solr 设置', 'admin/solr'),
+    array('索引任务', 'admin/solr/index'),
+  ), 'solr 管理');
+}
+
+/**
+ * @Implement of hook_cron()
+ */
+function solr_cron($last_timestamp) {
+  solr_data_import($last_timestamp);
+}
+
+/**
+ * 触发 hook_solr_data_import()，执行批量索引任务
+ * @param (int) $last_timestamp
+ *  上次执行时间戳
+ * @param (string) $group
+ *  分组名称，若指定，则只执行该分组的索引任务
+ */
+function solr_data_import($last_timestamp, $group = NULL) {
+  if ($functions = module_hook_get_cache('solr_data_import')) {
+    
+    $groups = solr_get_search_group();
+    $last = solr_data_import_last_info();
+    foreach ($functions as $module => $function) {
+      if (!empty($group)) {
+        
+        if (!isset($groups[$group])) {
+          break;
+        }
+        
+        if ($module != $groups[$group]['module']) {
+          continue;
+        }
+      }
+      
+      if (function_exists($function)) {
+        
+        if ($result = $function($last_timestamp, $group)) {
+          foreach ($result as $group_name => $data) {
+            
+            if (!empty($group) && $group != $group_name) {
+              continue;
+            }
+            
+            if (empty($data)) {
+              $msg = t('solr', '!title 没有需要更新的记录',  array('!title' => $groups[$group_name]['title']));
+              dd_log('solr', $msg);
+              dd_set_message($msg);
+              continue;
+            }
+            
+            if (isset($groups[$group_name])) {
+              $solr = new solr($group_name);
+              if ($solr->update($data)) {
+                $msg = t('solr', '!title: 约 %count 条记录操作成功', 
+                  array(
+                  '%count' => count($data),
+                  '!title' => $groups[$group_name]['title']
+                ));
+                dd_log('solr', $msg);
+                dd_set_message($msg);
+                $last[$group_name]['timestamp'] = time();
+                $last[$group_name]['id'] = array_pop(array_keys($data));
+                
+              }
+            } else {
+              dd_set_message(t('solr', '未定义的分组'));
+            }
+          }
+        } else {
+          $msg = t('solr', '!module 检查完毕，没有需要更新的记录',  array('!module' => $module));
+          dd_log('solr', $msg);
+          dd_set_message($msg);
+        }
+        
+      }
+    }
+    
+    custom_set('solr_data_import_last_info', $last);
+    
+  }
+}
+
+/**
+ * 提交数据到 solr，实时生效，大批量数据不宜使用此方法提交
+ * 通过此方法提交时，不会修改 solr_data_import_last_info 中最后提交 id 和时间
+ * @param string $group
+ *  搜索分组名称
+ * @param (array) $data
+ *  提交的数据，必须符合规范
+ */
+function solr_set_data_update($group, array $data) {
+  $groups = solr_get_search_group();
+  if (isset($groups[$group])) {
+    $solr = new solr($group);
+    return $solr->update($data);
+  } else {
+    dd_set_message('未定义的分组', 'error');
+    return false;
+  }
+}
+
+/**
+ * 获取通过 hook_solr_data_import() 提交的更新 id 和时间
+ * @param (string) $name
+ *  搜索分组名称
+ * @param (array)
+ *  返回最后记录 id  和时间戳。请注意，若提交时记录并非 asc 排序，那么最后 id 可能并不是最大值
+ */
+function solr_data_import_last_info($name = NULL) {
+  static $data;
+  
+  if (!isset($data)) {
+    $data = custom_get('solr_data_import_last_info', array());
+  }
+  
+  if (!isset($name)) {
+    return $data;
+  }
+  
+  return isset($data[$name]) ? $data[$name] : array('id' => 0, 'timestamp' => 0);
+}
+
+/**
+ * 按分组清除 solr 数据
+ * @param (string) $name
+ *  分组标识
+ */
+function solr_data_clear($name = NULL) {
+  $groups = solr_get_search_group();
+  if (isset($groups[$name])) {
+    $solr = new solr($name);
+    if ($result = $solr->deleteAll()) {
+      // 触发 hook_solr_clear_data()
+      module_invoke_all('solr_data_clear', $name);
+      $last = solr_data_import_last_info();
+      $last[$name] = array('id' => 0, 'timestamp' => 0);
+      custom_set('solr_data_import_last_info', $last);
+      return $result;
+    }
+  }
+}
+
+/**
+ * 基本搜索表单
+ * @param (string) $group
+ *  分组名称
+ * @param (string) $redirect
+ *  跳转地址
+ */
+function solr_search_form($group, $redirect = NULL) {
+  
+  $form['fields']['args']['query'] = array(
+    '#type' => 'textfield',
+    '#title' => '搜索',
+    '#required' => 1,
+    '#default_value' => isset($_GET['query']) ? urldecode($_GET['query']) : ''
+  );
+  
+  $form['settings'] = array(
+    '#validate' => array('solr_search_form_validate'),
+    '#ajax_validate' => 1,
+    '#attributes' => array('class' => 'solr_search_form_' . $group),
+    '#redirect' => isset($redirect) ? $redirect : 'search/' . $group
+  );
+  
+  $form['fields']['button'] = array(
+    '#type' => 'submit',
+    '#value' => t('solr', '确认搜索'),
+    '#weight' => 100
+  );
+  
+  module_alter_all('solr_search_form', $group, $form, $_GET);
+  
+  dd_add_css(dd_get_path('module', 'solr') . '/solr.css');
+  return $form;
+}
+
+function solr_search_form_validate(&$form, &$v) {
+  $args = $v['args'];
+  $args['op'] = 'search';
+  if (!empty($args['query'])) {
+    $args['query'] = urlencode($args['query']);
+  }
+  
+  if (!empty($form['settings']['#redirect'])) {
+    dd_goto($form['settings']['#redirect'], $args);
+  } else {
+    dd_goto($_GET['q'], $args);
+  }
+}
+
+/**
+ * @Implement of hook_theme()
+ */
+function solr_theme() {
+  return array(
+    'solr_search' => array(
+      'tpl' => 'solr_search.tpl.php',
+      'args' => array('search', 'group'),
+    ),
+  );
+}
+
+/**
+ * @Implement of hook_template_preprocess_x()
+ */
+function solr_template_preprocess_solr_search(&$var, $hook) {
+  if (!empty($var['group'])) {
+    $var['theme_config']->tpl[] = 'solr_search_'.$var['group'].'.tpl.php';
+  } 
+}
+
+function solr_get_cn_keywords($mat) {
+  if (mb_strlen($mat[0]) > 2) {
+    return solr::getKeywords($mat[0]);
+  } else {
+    return $mat[0];
+  }
+}
