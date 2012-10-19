@@ -1,0 +1,42 @@
+/*$Id$*/
+
+#solr_search_form {
+  padding: 5px 12px;
+  margin: 6px 0 12px 0;
+  border-bottom: 1px solid #ddd;
+}
+
+#solr_search_form div, #solr_search_form select, #solr_search_form input, #solr_search_form label{
+	display: inline;
+}
+
+.solr_search_page_info {
+	background:#D9E1F7;
+	height: 22px;
+	line-height: 22px;
+	margin: 6px 0;
+	padding: 0 5px;
+	text-align:right;
+}
+.solr_search_page_sort {
+  float: left;
+  display: block;
+}
+.solr_search_page_content {
+}
+
+.solr_search_page_content strong, .solr_search_page_content em {
+	color:#c00;
+}
+
+.solr_search_item_links {
+  color: #080;
+  text-align:right;
+  padding: 5px 12px;
+  margin: 5px 0;
+  border-bottom: 1px solid #ddd;
+}
+
+.solr_search_item_links a {
+	padding: 0 6px;
+}
