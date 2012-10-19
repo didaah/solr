@@ -32,7 +32,7 @@ function solr_solr_search_group() {
         'username' => '用户昵称',
         'body' => '话题内容',
         'comment' => '评论内容，多值',
-        'node_type' => '话题类型',
+        'node_type' => t('solr', '话题类型'),
       )
     );
     return $groups;
