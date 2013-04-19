@@ -80,6 +80,11 @@ class Solr {
     } else {
       throw new Exception('请提供 solr 服务地址');   
     }
+
+    // solr 版本
+    if (empty($this->_groupInfo['version'])) {
+      $this->_groupInfo['version'] = '3.x'; // 3.x 4.x
+    }
     
     // 超时时间
     if (!empty($timeout)) {
@@ -210,15 +215,18 @@ class Solr {
     $waitFlush = $waitFlush ? 'true' : 'false';
     $waitSearcher = $waitSearcher ? 'true' : 'false';
     $expungeDeletes = $expungeDeletes ? 'true' : 'false';
-    $data = '<commit waitFlush="'.$waitFlush.'" waitSearcher="'.$waitSearcher.'" expungeDeletes="'.$expungeDeletes.'"/>';
+
+    if ($this->_groupInfo['version'] == '3.x') {
+      $data = '<commit waitFlush="'.$waitFlush.'" waitSearcher="'.$waitSearcher.'" expungeDeletes="'.$expungeDeletes.'"/>';
+    } else {
+      $data = '<commit waitSearcher="'.$waitSearcher.'" expungeDeletes="'.$expungeDeletes.'"/>';
+    }
     
     $result = dd_http_request($this->_service . '/update?wt=json', $data, 'POST', 
       array('Content-Type' => 'text/xml; charset=utf-8')
     );
     
     if ($result->code == 200) {
-      // @TODO solr 3.5 弃用了这个方法，待修改
-      //$this->optimize();
       return json_decode($result->data);
     }
     

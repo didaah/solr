@@ -4,7 +4,7 @@
 /**
  * 默认语言：Chinese, Simplified(简体中文)(zh-hans)
  * 翻译语言：Chinese, Traditional(繁體中文)(zh-hant)
- * 共有 25 条翻译
+ * 共有 26 条翻译
  */
 
 $lang = array (
@@ -33,6 +33,7 @@ $lang = array (
   '!module 检查完毕，没有需要更新的记录' => '!module 检查完毕，没有需要更新的记录',
   '确认搜索' => '确认搜索',
   '搜索' => '搜索',
+  '话题类型' => '话题类型',
 );
 $js_lang = array (
 );
