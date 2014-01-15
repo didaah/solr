@@ -225,7 +225,7 @@ class Solr {
     $result = dd_http_request($this->_service . '/update?wt=json', $data, 'POST', 
       array('Content-Type' => 'text/xml; charset=utf-8')
     );
-    
+
     if ($result->code == 200) {
       return json_decode($result->data);
     }
@@ -1075,16 +1075,13 @@ function solr_cron($last_timestamp) {
  */
 function solr_data_import($last_timestamp, $group = NULL) {
   if ($functions = module_hook_get_cache('solr_data_import')) {
-    
     $groups = solr_get_search_group();
     $last = solr_data_import_last_info();
     foreach ($functions as $module => $function) {
       if (!empty($group)) {
-        
         if (!isset($groups[$group])) {
           break;
         }
-        
         if ($module != $groups[$group]['module']) {
           continue;
         }
@@ -1132,9 +1129,8 @@ function solr_data_import($last_timestamp, $group = NULL) {
         
       }
     }
-    
     custom_set('solr_data_import_last_info', $last);
-    
+    solr_data_import_last_info(0, 1);
   }
 }
 
@@ -1164,11 +1160,16 @@ function solr_set_data_update($group, array $data) {
  * @param (array)
  *  返回最后记录 id  和时间戳。请注意，若提交时记录并非 asc 排序，那么最后 id 可能并不是最大值
  */
-function solr_data_import_last_info($name = NULL) {
+function solr_data_import_last_info($name = NULL, $clear = NULL) {
   static $data;
-  
-  if (!isset($data)) {
-    $data = custom_get('solr_data_import_last_info', array());
+     
+  if (!isset($data) || !empty($clear)) {
+    if ($value = db_query('SELECT value FROM {custom} WHERE name = ?',
+    array('solr_data_import_last_info'), array('return' => 'column'))) {
+      $data = unserialize($value);
+    } else {
+      $data = array();
+    }
   }
   
   if (!isset($name)) {
