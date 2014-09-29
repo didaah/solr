@@ -64,6 +64,9 @@ function solr_page_search($group = NULL) {
 
       // solr 返回的查询参数
       $search->params = $result->responseHeader->params;
+      if (empty($search->params)) {
+        $search->params = new stdClass();
+      }
 
       if (empty($search->params->rows)) {
         $search->params->rows = 10;
