@@ -152,7 +152,7 @@ class Solr {
       }
       
       // 主记录 id 
-      $source .= '<field name="id">' . (!empty($fields['id']) ? $fields['id'] : $id) . '</field>';
+      $source .= '<field name="id">' . (!empty($fields['items']['id']) ? $fields['items']['id'] : $id) . '</field>';
       
       foreach ($fields['items'] as $key => $value) {
         // 未定义的字段 
