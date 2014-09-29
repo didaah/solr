@@ -22,14 +22,13 @@ function solr_admin_settings() {
     $form['fields']['solr']['service_' . $key] = array(
       '#title' => $value['title'],
       '#type' => 'textfield',
-      '#required' => 1,
       '#default_value' => var_get_key('solr', 'service_' . $key, $value['service']),
     );
     if ($i === false) {
       $form['fields']['solr']['service_' . $key]['#fieldset'] = 1;
       $form['fields']['solr']['service_' . $key]['#fieldset_prefix'] = 'asc';
       $form['fields']['solr']['service_' . $key]['#fieldset_legend'] = '服务地址';
-      $form['fields']['solr']['service_' . $key]['#description'] = '如： http://localhost:8983/solr';
+      $form['fields']['solr']['service_' . $key]['#description'] = '如： http://localhost:8983/solr，留空则禁用';
     }
     $i = $key;
   }

@@ -13,7 +13,7 @@ function solr_page_search($group = NULL) {
   }
   
   foreach ($groups as $key => $item) {
-    if (user_access('solr search ' . $key . ' view')) {
+    if (user_access('solr search ' . $key . ' view') && !empty(var_get_key('solr', 'service_' . $key))) {
       $tab_title = empty($item['page_title']) ? $item['title'] : $item['page_title'];
       $tabs[] = l($tab_title, 'search/' . $key);
       if (!isset($group)) {

@@ -852,7 +852,7 @@ function solr_get_search_group($name = NULL, $clear = false) {
       foreach ($datas as $module => $data) {
         foreach ($data as $key => $group) {
           if (empty($group['title']) || !is_array($group['fields']) || empty($group['service'])) {
-            dd_set_message($key . ' 设置不正确，请参考 solr_solr_search_group()', 'error');
+            dd_set_message($key . ' 配置不完整，请参照 solr_solr_search_group()', 'error');
           } else {
             $groups[$key] = $group;
             $groups[$key]['module'] = $module;
@@ -1033,7 +1033,9 @@ function solr_is_search_page($group = NULL) {
     $group = var_get_key('solr', 'search_default', 'user');
   }
   
-  return user_access('solr search ' . $group . ' view') && solr_get_search_group($group);
+  if (!empty(var_get_key('solr', 'service_' . $group))) {
+    return user_access('solr search ' . $group . ' view') && solr_get_search_group($group);
+  }
 }
 
 /**
@@ -1043,7 +1045,9 @@ function solr_perm() {
   $perms['admin solr settings'] = t('solr', 'solr 设置');
   
   foreach (solr_get_search_group() as $key => $group) {
-    $perms['solr search ' . $key . ' view'] = $group['title']; 
+    if (!empty(var_get_key('solr', 'service_' . $key))) {
+      $perms['solr search ' . $key . ' view'] = $group['title']; 
+    }
   }
   
   return $perms;
@@ -1096,6 +1100,10 @@ function solr_data_import($last_timestamp, $group = NULL) {
               continue;
             }
             
+            if (empty(var_get_key('solr', 'service_' . $group))) {
+              continue;
+            }
+
             if (empty($data)) {
               $msg = t('solr', '!title 没有需要更新的记录',  array('!title' => $groups[$group_name]['title']));
               dd_log('solr', $msg);
