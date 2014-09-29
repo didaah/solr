@@ -65,11 +65,15 @@ function solr_page_search($group = NULL) {
       // solr 返回的查询参数
       $search->params = $result->responseHeader->params;
 
+      if (empty($search->params->rows)) {
+        $search->params->rows = 10;
+      }
+
       if (!empty($result->response->docs)) {
         $search->sort = module_invoke($groups[$group]['module'], 'solr_search_sort', $group);
         $search->count = $result->response->numFound;
         $search->content = module_invoke($groups[$group]['module'], 'solr_search_view', $group, $result);
-        pager_lists($result->response->numFound, $result->responseHeader->params->rows);
+        pager_lists($result->response->numFound, $search->params->rows);
         $search->pager = pager_view(array('no_input' => true));
       } else {
         if (!$search->content = module_invoke($groups[$group]['module'], 'solr_search_no_result', $group, $result)) {
