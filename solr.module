@@ -1100,7 +1100,7 @@ function solr_data_import($last_timestamp, $group = NULL) {
               continue;
             }
             
-            if (empty(var_get_key('solr', 'service_' . $group))) {
+            if (!var_get_key('solr', 'service_' . $group)) {
               continue;
             }
 
