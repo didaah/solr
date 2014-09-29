@@ -1033,7 +1033,7 @@ function solr_is_search_page($group = NULL) {
     $group = var_get_key('solr', 'search_default', 'user');
   }
   
-  if (!empty(var_get_key('solr', 'service_' . $group))) {
+  if (var_get_key('solr', 'service_' . $group)) {
     return user_access('solr search ' . $group . ' view') && solr_get_search_group($group);
   }
 }
