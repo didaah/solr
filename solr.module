@@ -1045,7 +1045,7 @@ function solr_perm() {
   $perms['admin solr settings'] = t('solr', 'solr 设置');
   
   foreach (solr_get_search_group() as $key => $group) {
-    if (!empty(var_get_key('solr', 'service_' . $key))) {
+    if (var_get_key('solr', 'service_' . $key)) {
       $perms['solr search ' . $key . ' view'] = $group['title']; 
     }
   }
