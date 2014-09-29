@@ -152,7 +152,7 @@ class Solr {
       }
       
       // 主记录 id 
-      $source .= '<field name="id">' . $id . '</field>';
+      $source .= '<field name="id">' . (!empty($fields['id']) ? $fields['id'] : $id) . '</field>';
       
       foreach ($fields['items'] as $key => $value) {
         // 未定义的字段 
@@ -187,7 +187,7 @@ class Solr {
     }
     
     $source .= '</add>';
-    
+
     $headers = array(
       'Content-Type' => 'text/xml; charset=utf-8'
     );
@@ -1103,7 +1103,6 @@ function solr_data_import($last_timestamp, $group = NULL) {
             if (!var_get_key('solr', 'service_' . $group)) {
               continue;
             }
-
             if (empty($data)) {
               $msg = t('solr', '!title 没有需要更新的记录',  array('!title' => $groups[$group_name]['title']));
               dd_log('solr', $msg);
