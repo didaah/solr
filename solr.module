@@ -58,6 +58,8 @@ class Solr {
 
   // 查询时最终提交的查询参数
   public $queryData;
+
+  public $error;
   
   /**
    * 构造函数
@@ -109,9 +111,9 @@ class Solr {
       return json_decode($result->data);
     } else {
       dd_set_message(t('solr', '无法连接 solr'), 'error');
+      $this->error = $result;
       return false;
     }
-    
   }
   
   /**
@@ -138,6 +140,7 @@ class Solr {
   public function update($parts = array(), $commit = true) {
     $source = '<add>';
     $keys = $this->_groupInfo['fields'];
+
     unset($keys['id']);
     
     foreach ($parts as $id => $fields) {
@@ -156,9 +159,9 @@ class Solr {
       
       foreach ($fields['items'] as $key => $value) {
         // 未定义的字段 
-        if (empty($keys[$key])) continue;
-        if (is_array($value) || is_object($value)) {
+        if (!empty($keys) && empty($keys[$key])) continue;
 
+        if (is_array($value) || is_object($value)) {
           // 序列化存储
           if (is_array($keys[$key]) && !empty($keys[$key]['serialize'])) {
             $source .= '<field name="' . $key . '">' . serialize($value) . '</field>';
@@ -199,7 +202,9 @@ class Solr {
       }
       return json_decode($result->data);
     }
-    
+
+    unset($result->data);
+    $this->error = $result;
     return false;
   }
   
@@ -230,6 +235,7 @@ class Solr {
       return json_decode($result->data);
     }
     
+    $this->error = $result;
     return false;
   }
   
@@ -254,6 +260,7 @@ class Solr {
       return json_decode($result->data);
     }
     
+    $this->error = $result;
     return false;
   }
   
@@ -273,6 +280,7 @@ class Solr {
       return json_decode($result->data);
     }
     
+    $this->error = $result;
     return false;
   }
   
@@ -287,7 +295,6 @@ class Solr {
    
     if (isset($query)) {
       if (is_array($query)) {
-        
         foreach ($query as $key => $value) {
           if (is_numeric($key)) {
             continue;
@@ -311,23 +318,21 @@ class Solr {
               }
               
             } else {
-              $data[$key] = $key .'='. urlencode($value);
+              if (is_bool($value)) {
+                $value = $value === true ? 'true' : 'false';
+              }
+              $data[$key] = $key . '=' . urlencode($value);
             }
             
           }
         }
         
       } else if (is_string($query)) {
-        
         $data['q'] .= 'q='.urlencode($query);
-        
       } else {
-        
         dd_set_message(t('solr', '无效的查询'), 'error');
         return false;
-        
       }
-      
     }
     
     // 若未指明类型，则默认为 json
@@ -372,6 +377,7 @@ class Solr {
       }
     }
    
+    $this->error = $result;
     return false;
   }
   
@@ -410,6 +416,7 @@ class Solr {
       return json_decode($result->data);
     }
     
+    $this->error = $result;
     return false;
   }
   
@@ -443,6 +450,7 @@ class Solr {
       return json_decode($result->data);
     }
     
+    $this->error = $result;
     return false;
   }
   
@@ -462,8 +470,8 @@ class Solr {
       return json_decode($result->data);
     }
     
+    $this->error = $result;
     return false;
-    
   }
   
   /**
@@ -568,7 +576,6 @@ class Solr {
     
     return $datas[$text][$array];
   }
-  
 }
 
 /**
@@ -617,7 +624,6 @@ function solr_query_by_id($group, $id, $clear = false) {
   
   return $data[$group][$id];
 }
-
 
 /**
  * @Implement of hook_solr_search_default_view()
@@ -978,6 +984,12 @@ function solr_og_node_status($node) {
   }
 }
 
+/*
+    if (module_exists('solr')) {
+      $og->search_form = dd_get_form('solr_search_form', 'og_node', NULL, array('oid' => $og->oid));
+    }
+    
+ */
 /**
  * @Implement of hook_system_cache_clear()
  */
