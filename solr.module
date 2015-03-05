@@ -158,8 +158,8 @@ class Solr {
       $source .= '<field name="id">' . (!empty($fields['items']['id']) ? $fields['items']['id'] : $id) . '</field>';
       
       foreach ($fields['items'] as $key => $value) {
-        // 未定义的字段 
-        if (!empty($keys) && empty($keys[$key])) continue;
+        // 若不允许动态字段，则未定义的字段不解析
+        if (empty($this->_groupInfo['dynamic_field']) && !empty($keys) && empty($keys[$key])) continue;
 
         if (is_array($value) || is_object($value)) {
           // 序列化存储
