@@ -913,6 +913,7 @@ function solr_get_search_group($name = NULL, $clear = false) {
             dd_set_message($key . ' 配置不完整，请参照 solr_solr_search_group()', 'error');
           } else {
             $groups[$key] = $group;
+            $groups[$key]['key'] = $key;
             $groups[$key]['module'] = $module;
             // 如果没有设置主键，默认为 id
             if (empty($groups[$key]['primary_key'])) {
