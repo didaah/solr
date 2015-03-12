@@ -20,6 +20,7 @@ function solr_solr_search_group() {
        * 预处理查询关键词，即通过  getKeywords 将用户输入分词
        */
       'query_keywords' => true, 
+      'primary_key' => 'id',
       'fields' => array( // 索引字段定义
         'id' => 'nid', // 话题 nid
         'oid' => '小组 id',
@@ -61,6 +62,9 @@ class Solr {
 
   public $error;
   
+  // 主键名称
+  public $primay_key;
+
   /**
    * 构造函数
    * @param (string) $searchGroup
@@ -96,6 +100,12 @@ class Solr {
     } else {
       $this->_timeout = 30;
     }
+  
+    if (!empty($this->_groupInfo['primary_key'])) {
+      $this->primary_key = $this->_groupInfo['primary_key'];
+    } else {
+      $this->primary_key = 'id';
+    }
     
   }
   
@@ -115,7 +125,7 @@ class Solr {
       return false;
     }
   }
-  
+
   /**
    * 添加数据源
    * @param (array) $parts
@@ -141,7 +151,7 @@ class Solr {
     $source = '<add>';
     $keys = $this->_groupInfo['fields'];
 
-    unset($keys['id']);
+    unset($keys[$this->primary_key]);
     
     foreach ($parts as $id => $fields) {
       if (!isset($fields['items'])) {
@@ -151,15 +161,26 @@ class Solr {
       if (!isset($field['attributes'])) {
         $source .= '<doc>';
       } else {
-        $source .= '<doc'.dd_attributes($field['attributes']).'>';
+        $source .= '<doc' . dd_attributes($field['attributes']) . '>';
       }
       
-      // 主记录 id 
-      $source .= '<field name="id">' . (!empty($fields['items']['id']) ? $fields['items']['id'] : $id) . '</field>';
+      // 主键记录
+      $source .= '<field name="' . $this->primary_key . '">';
+      if (!empty($fields['items'][$this->primary_key])) {
+        $source .= $fields['items'][$this->primary_key];
+      } else {
+        $source .= $id;
+      }
+
+      $source .= '</field>';
       
       foreach ($fields['items'] as $key => $value) {
         // 若不允许动态字段，则未定义的字段不解析
-        if (empty($this->_groupInfo['dynamic_field']) && !empty($keys) && empty($keys[$key])) continue;
+        if (empty($this->_groupInfo['dynamic_field']) && !empty($keys) && empty($keys[$key])) {
+          continue;
+        }
+
+        $field_type = !empty($keys[$key]['type']) ? $keys[$key]['type'] : '';
 
         if (is_array($value) || is_object($value)) {
           // 序列化存储
@@ -171,19 +192,23 @@ class Solr {
           if (is_object($value)) $value = (array) $value;
 
           if (isset($value['data'])) {
-            $source .= '<field name="'.$key;
+            $source .= '<field name="' . $key;
             if (isset($value['attributes'])) {
               $source .= dd_attributes($value['attributes']);
             }
 
-            $source .= '>' . $this->formatText($value['data']) . '</field>';
+            $source .= '>' . $this->formatText($value['data'], $field_type) . '</field>';
           } else {
             foreach ($value as $muti) {
-              $source .= '<field name="'.$key.'">' . $this->formatText($muti) . '</field>';
+              $source .= '<field name="' . $key . '">';
+              $source .= $this->formatText($muti, $field_type);
+              $source .= '</field>';
             }
           }
         } else {
-          $source .= '<field name="'.$key.'">' . $this->formatText($value) . '</field>';
+          $source .= '<field name="' . $key . '">';
+          $source .= $this->formatText($value, $field_type);
+          $source .= '</field>';
         }
       }
       $source .= '</doc>';
@@ -222,9 +247,9 @@ class Solr {
     $expungeDeletes = $expungeDeletes ? 'true' : 'false';
 
     if ($this->_groupInfo['version'] == '3.x') {
-      $data = '<commit waitFlush="'.$waitFlush.'" waitSearcher="'.$waitSearcher.'" expungeDeletes="'.$expungeDeletes.'"/>';
+      $data = '<commit waitFlush="' . $waitFlush . '" waitSearcher="' . $waitSearcher . '" expungeDeletes="' . $expungeDeletes . '"/>';
     } else {
-      $data = '<commit waitSearcher="'.$waitSearcher.'" expungeDeletes="'.$expungeDeletes.'"/>';
+      $data = '<commit waitSearcher="' . $waitSearcher . '" expungeDeletes="' . $expungeDeletes . '"/>';
     }
     
     $result = dd_http_request($this->_service . '/update?wt=json', $data, 'POST', 
@@ -248,9 +273,13 @@ class Solr {
    * @return (false or object)
    */
   public function optimize($waitFlush = true, $waitSearcher = true, $maxSegments = 1) {
-    $waitFlush = $waitFlush ? 'true' : 'false';
     $waitSearcher = $waitSearcher ? 'true' : 'false';
-    $data = '<optimize waitFlush="'.$waitFlush.'" waitSearcher="'.$waitSearcher.'" maxSegments="'.$maxSegments.'"/>';
+    if ($this->_groupInfo['version'] == '3.x') {
+      $waitFlush = $waitFlush ? 'true' : 'false';
+      $data = '<optimize waitFlush="' . $waitFlush . '" waitSearcher="' . $waitSearcher . '" maxSegments="' . $maxSegments . '"/>';
+    } else {
+      $data = '<optimize waitSearcher="' . $waitSearcher . '" maxSegments="' . $maxSegments . '"/>';
+    }
     
     $result = dd_http_request($this->_service . '/update?wt=json', $data, 'POST',
       array('Content-Type' => 'text/xml; charset=utf-8')
@@ -385,7 +414,7 @@ class Solr {
    * 按 id 删除
    * @link http://wiki.apache.org/solr/UpdateXmlMessages#A.22delete.22_by_ID_and_by_Query
    * @param (string or array) $id
-   *  待删除记录的 id 值，一条或多条，多条以数组形式传递
+   *  待删除记录的主键值，一条或多条，多条以数组形式传递
    * @param (bool) $commit
    *  使删除立即生效
    * @return (false or object)
@@ -397,10 +426,10 @@ class Solr {
     
     if (is_array($ids)) {
       foreach ($ids as $id) {
-        $data .= '<id>' . $id . '</id>';
+        $data .= '<' . $this->primary_key . '>' . $id . '</' . $this->primary_key . '>';
       }
     } else {
-      $data .= '<id>' . $ids . '</id>';
+      $data .= '<' . $this->primary_key . '>' . $ids . '</' . $this->primary_key . '>';
     }
     
     $data .='</delete>';
@@ -459,7 +488,7 @@ class Solr {
    */
   public function deleteAll() {
     
-    $data = '<delete><query>id:*</query></delete>';
+    $data = '<delete><query>*:*</query></delete>';
     
     $result = dd_http_request($this->_service . '/update?wt=json', $data, 'POST',
       array('Content-Type' => 'text/xml; charset=utf-8')
@@ -493,9 +522,25 @@ class Solr {
    * 格式化处理
    * @param string $text
    * 	待处理的字符串
+   * @param string $type
+   *  数据类型
    * @return string
    */
-  public function formatText($text) {
+  public function formatText($text, $type) {
+    switch ($type) {
+      case 'tlong': case 'int': case 'long':
+        $text = preg_replace('/[^0-9]/ims', '', $text);
+      return $text;
+      case 'tfloat': case 'float':
+        if (!is_numeric($text)) {
+          $text = preg_replace('/[^0-9\.]/ims', '', $text);
+        }
+        // 小数点多于1个，全部去掉
+        if (substr_count($text, '.') > 1) {
+          $text = str_replace('.', '', $text);
+        }
+      return $text;
+    }
 
     if (empty($this->_groupInfo['is_format'])) {
       return htmlspecialchars($text, ENT_QUOTES, 'UTF-8');
@@ -514,7 +559,7 @@ class Solr {
     
     $text = htmlspecialchars($text, ENT_QUOTES, 'UTF-8');
     $text = preg_replace('@[\x00-\x08\x0B\x0C\x0E-\x1F]@', ' ', $text);
-    
+   
     return $text;
   }
 
@@ -596,8 +641,6 @@ function solr_update_by_id($group, $id, $doc, $commit = true) {
     $doc = array_merge((array) $o, $doc);
   }
   
-  $doc['id'] = $id;
-
   $data = array($id => array('items' => $doc));
 
   $api = new Solr($group);
@@ -616,7 +659,7 @@ function solr_query_by_id($group, $id, $clear = false) {
   if ($clear || !isset($data[$group][$id])) {
     $data[$group][$id] = false;
     $api = new Solr($group);
-    $result = $api->query(array('q' => 'id:' . $id, 'rows' => 1, 'start' => 0));
+    $result = $api->query(array('q' => $api->primary_key . ':' . $id, 'rows' => 1, 'start' => 0));
     if (!empty($result->response->numFound)) {
       $data[$group][$id] = $result->response->docs[0];     
     }
@@ -867,6 +910,10 @@ function solr_get_search_group($name = NULL, $clear = false) {
           } else {
             $groups[$key] = $group;
             $groups[$key]['module'] = $module;
+            // 如果没有设置主键，默认为 id
+            if (empty($groups[$key]['primary_key'])) {
+              $groups[$key]['primary_key'] = 'id';
+            }
           }
         }
       }
@@ -900,16 +947,16 @@ function solr_code_tags_format($mat) {
  * 模块可调用  solr::update 自动提交，比如在某个内容添加/更新成功后，主动提交到 solr
  * 
  * @param int $last_timestamp
- *  上次执行时间，实际上是上次 cron 运行或手动触发提交的时间
+ *  上次 hook 运行的时间
  * @param string $group
  *  搜索组名
  * @return array 按搜索分组标识返回符合 solr 规则的数据
  */
-function solr_solr_data_import($last_timestamp, $group = NULL) {
+function solr_solr_data_import($last_timestamp, $group) {
   
   $data = array();
   
-  if (module_exists('og')) {
+  if (module_exists('og') && $group == 'og_node') {
     // 获得上次提交信息，包括时间戳和最后一个 id
     $last = solr_data_import_last_info('og_node');
     
@@ -1095,9 +1142,35 @@ function solr_cron($last_timestamp) {
  *  分组名称，若指定，则只执行该分组的索引任务
  */
 function solr_data_import($last_timestamp, $group = NULL) {
+  $groups = solr_get_search_group();
+  $last = solr_data_import_last_info();
+  foreach ($groups as $group_name => $info) {
+    if (!empty($group) && $group_name != $group) {
+      continue;
+    }
+    $function = $info['module'] . '_solr_data_import';
+    if (function_exists($function)) {
+      if ($data = $function($last_timestamp, $group, $last[$group_name])) {
+        $solr = new solr($group_name);
+        if ($solr->update($data)) {
+          $msg = t('solr', '!title: 约 %count 条记录操作成功', array(
+            '%count' => count($data),
+            '!title' => $groups[$group_name]['title']
+          ));
+          dd_log('solr', $msg);
+          dd_set_message($msg);
+          $last[$group_name]['timestamp'] = time();
+          $last[$group_name]['id'] = array_pop(array_keys($data));
+        }
+      }
+    }
+  } 
+  custom_set('solr_data_import_last_info', $last);
+  solr_data_import_last_info(0, 1);
+
+  return true;
+
   if ($functions = module_hook_get_cache('solr_data_import')) {
-    $groups = solr_get_search_group();
-    $last = solr_data_import_last_info();
     foreach ($functions as $module => $function) {
       if (!empty($group)) {
         if (!isset($groups[$group])) {
@@ -1110,7 +1183,7 @@ function solr_data_import($last_timestamp, $group = NULL) {
       
       if (function_exists($function)) {
         
-        if ($result = $function($last_timestamp, $group)) {
+        if ($result = $function($last_timestamp, $group, $last_info)) {
           foreach ($result as $group_name => $data) {
             
             if (!empty($group) && $group != $group_name) {
@@ -1222,6 +1295,15 @@ function solr_data_clear($name = NULL) {
     }
   }
 }
+ 
+/**
+ * @Implement of hook_solr_data_clear()
+ */
+//function solr_solr_data_clear($group_type) {
+//  if ($group_type == 'og_node') {
+//    dd_set_message(t('solr', '清除成功'));
+//  }
+//}
 
 /**
  * 基本搜索表单
@@ -1290,7 +1372,7 @@ function solr_theme() {
  */
 function solr_template_preprocess_solr_search(&$var, $hook) {
   if (!empty($var['group'])) {
-    $var['theme_config']->tpl[] = 'solr_search_'.$var['group'].'.tpl.php';
+    $var['theme_config']->tpl[] = 'solr_search_' . $var['group'].' . tpl.php';
   } 
 }
 
@@ -1301,3 +1383,4 @@ function solr_get_cn_keywords($mat) {
     return $mat[0];
   }
 }
+
