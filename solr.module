@@ -325,16 +325,29 @@ class Solr {
     return false;
   }
   
+  // public query($query = NULL, $method = 'GET', $filter = true) {{{ 
   /**
-   * 执行一个  solr 查询
-   * @param (string or array) $query
+   * query
+   *  执行一个  solr 查询
+   * 
+   * @param (string|array) $query 
    *  查询相关参数
+   * @param string $method 
+   * @param mixed $filter 
+   * @access public
+   * @return void
    */
-  public function query($query = NULL, $method = 'GET') {
-    $data = array();
-    $rows = 10;
+  public function query($query, $method = 'GET', $filter = true) {
+    if (empty($query)) {
+      dd_set_message(t('solr', '无效的查询'), 'error');
+      $this->error = t('solr', '无效的查询');
+      return false;
+    }
+
+    if (!empty($filter)) {
+      $data = array();
+      $rows = 10;
    
-    if (isset($query)) {
       if (is_array($query)) {
         foreach ($query as $key => $value) {
           if (is_numeric($key)) {
@@ -360,41 +373,49 @@ class Solr {
             }
           }
         }
-      } else if (is_string($query)) {
-        $data['q'] .= 'q=' . urlencode($query);
       } else {
-        dd_set_message(t('solr', '无效的查询'), 'error');
-        return false;
+        $data['q'] .= 'q=' . urlencode($query);
+      }
+       
+      // 若未指明类型，则默认为 json
+      if (empty($data['wt'])) {
+        $data['wt'] = 'wt=json';
+      }
+      
+      /**
+       * 
+       * 若是 json，返回 map
+       * @link http://wiki.apache.org/solr/SolJSON#JSON_specific_parameters
+       */
+      if (empty($data['json.nl'])) {
+        $data['json.nl'] = 'json.nl=map';
+      }
+      
+      // 若未指明字段，则获取该组定义的全部字段
+      if (empty($data['fl'])) {
+        $data['fl'] = 'fl=' . implode(',', array_keys($this->_groupInfo['fields'])) . ',score';
+      }
+      
+      $data['rows'] = 'rows=' . $rows;
+      
+      if (!isset($data['start']) && !empty($_GET['page'])) {
+        $data['start'] = 'start=' . ($_GET['page']*$rows);
+      }
+
+      $this->queryData = $data;
+      $this->queryString = implode('&', $data);
+    } else {
+      $this->queryString = $query;
+      $this->queryData = array();
+      if ($v = explode('&', $query)) {
+        foreach ($v as $_v) {
+          $_a = explode('=', $_v, 2);
+          $this->queryData[$_a[0]] = $_v;
+        }
+      } else {
+        $data = array('wt' => 'wt=json');
       }
     }
-    
-    // 若未指明类型，则默认为 json
-    if (empty($data['wt'])) {
-      $data['wt'] = 'wt=json';
-    }
-    
-    /**
-     * 
-     * 若是 json，返回 map
-     * @link http://wiki.apache.org/solr/SolJSON#JSON_specific_parameters
-     */
-    if (empty($data['json.nl'])) {
-      $data['json.nl'] = 'json.nl=map';
-    }
-    
-    // 若未指明字段，则获取该组定义的全部字段
-    if (empty($data['fl'])) {
-      $data['fl'] = 'fl=' . implode(',', array_keys($this->_groupInfo['fields'])) . ',score';
-    }
-    
-    $data['rows'] = 'rows=' . $rows;
-    
-    if (!isset($data['start']) && !empty($_GET['page'])) {
-      $data['start'] = 'start=' . ($_GET['page']*$rows);
-    }
-
-    $this->queryData = $data;
-    $this->queryString = implode('&', $data);
 
     module_alter_all('solr_query_before', $this->_groupInfo, $this);
 
@@ -405,7 +426,7 @@ class Solr {
     }
     
     if ($result->code == 200) {
-      if ($data['wt'] == 'wt=json') {
+      if ($this->queryData['wt'] == 'wt=json') {
         return json_decode($result->data);
       } else {
         return $result->data;
@@ -415,6 +436,7 @@ class Solr {
     $this->error = $result;
     return false;
   }
+  // }}}
   
   /**
    * 按 id 删除
