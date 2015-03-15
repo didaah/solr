@@ -57,13 +57,20 @@ class Solr {
    */
   protected $_groupInfo;
 
-  // 查询时最终提交的查询参数
+  // 最终提交的查询数组形式
   public $queryData;
 
+  // 最终提交的查询字符串形式
+  public $queryString;
+
+  // 错误信息
   public $error;
   
   // 主键名称
   public $primay_key;
+
+  // 自定义数据
+  public $custom_data;
 
   /**
    * 构造函数
@@ -107,6 +114,7 @@ class Solr {
       $this->primary_key = 'id';
     }
     
+    $this->custom_data = array();
   }
   
   /**
@@ -333,35 +341,27 @@ class Solr {
             continue;
           } else if (is_array($value)) {
             $ks = array();
-            
             foreach ($value as $k) {
               $ks[] = $key . '=' . urlencode($k); 
             }
-            
             $data[$key] = implode('&', $ks);
-            
           } else {
-            
             if ($key == 'q') {
-              $data['q'] .= 'q='.urlencode($value);
+              $data['q'] .= 'q=' . urlencode($value);
             } else if ($key == 'rows') {
-              
               if (is_numeric($value)) {
                 $rows = floor($value);
               }
-              
             } else {
               if (is_bool($value)) {
                 $value = $value === true ? 'true' : 'false';
               }
               $data[$key] = $key . '=' . urlencode($value);
             }
-            
           }
         }
-        
       } else if (is_string($query)) {
-        $data['q'] .= 'q='.urlencode($query);
+        $data['q'] .= 'q=' . urlencode($query);
       } else {
         dd_set_message(t('solr', '无效的查询'), 'error');
         return false;
@@ -393,13 +393,15 @@ class Solr {
       $data['start'] = 'start=' . ($_GET['page']*$rows);
     }
 
-    // 最终查询参数
     $this->queryData = $data;
+    $this->queryString = implode('&', $data);
+
+    module_alter_all('solr_query_before', $this->_groupInfo, $this);
 
     if ($method == 'GET') {
-      $result = dd_http_request($this->_service . '/select?' . implode('&', $data), NULL, 'GET');
+      $result = dd_http_request($this->_service . '/select?' . $this->queryString, NULL, 'GET');
     } else {
-      $result = dd_http_request($this->_service . '/select', implode('&', $data), 'POST');
+      $result = dd_http_request($this->_service . '/select', $this->queryString, 'POST');
     }
     
     if ($result->code == 200) {
