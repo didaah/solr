@@ -24,7 +24,9 @@ switch ($_args['solr_command']) {
   case 'update':
     // 更新数据
     $last_timestamp = var_get('cron_last_time', 0);
-    solr_data_import($last_timestamp, $group_type, $commit);
+    if ($result = solr_data_import($last_timestamp, $group_type, $commit)) {
+      message($result);
+    }
   break;
   case 'commit':
     // 使索引生效
@@ -68,4 +70,6 @@ switch ($_args['solr_command']) {
       message($solr->error);
     }
 }
+
+message(time()-$_SERVER['REQUEST_TIME']);
 
