@@ -18,11 +18,13 @@ if (!$info = solr_get_search_group($group_type)) {
   return;
 }
 
+$commit = !empty($_args['is_commit']) ? true : false;
+
 switch ($_args['solr_command']) {
   case 'update':
     // 更新数据
     $last_timestamp = var_get('cron_last_time', 0);
-    solr_data_import($last_timestamp, $group_type);
+    solr_data_import($last_timestamp, $group_type, $commit);
   break;
   case 'commit':
     // 使索引生效
