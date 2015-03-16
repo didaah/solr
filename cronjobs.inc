@@ -36,5 +36,17 @@ function solr_cronjobs($timestamp) {
     'minute' => '50', 
   );
 
+  $cronjobs['update'] = array(
+    'name' => t('solr', '索引更新'),
+    'description' => t('solr', '每 10 分钟自动更新'),
+    'param' => array('last_timestamp' => $timestamp),
+    'script' => 'update.inc',
+    'year' => '*',
+    'month' => '*',
+    'day' => '*', 
+    'hour' => '*',
+    'minute' => '*/10', 
+  );
+
   return $cronjobs;
 }

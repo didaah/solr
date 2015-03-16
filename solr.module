@@ -1160,7 +1160,8 @@ function solr_system_admin_menus() {
  * @Implement of hook_cron()
  */
 function solr_cron($last_timestamp) {
-  solr_data_import($last_timestamp);
+  // @TODO 改在 cronjobs.inc 里执行
+  // solr_data_import($last_timestamp);
 }
 
 /**
