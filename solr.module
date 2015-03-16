@@ -1171,7 +1171,7 @@ function solr_cron($last_timestamp) {
  * @param (string) $group
  *  分组名称，若指定，则只执行该分组的索引任务
  */
-function solr_data_import($last_timestamp, $group = NULL) {
+function solr_data_import($last_timestamp, $group = NULL, $commit = true) {
   $groups = solr_get_search_group();
   $last = solr_data_import_last_info();
   foreach ($groups as $group_name => $info) {
@@ -1185,7 +1185,7 @@ function solr_data_import($last_timestamp, $group = NULL) {
     if (function_exists($function)) {
       if ($data = $function($last_timestamp, $group, $last_info)) {
         $solr = new solr($group_name);
-        if ($solr->update($data)) {
+        if ($solr->update($data, $commit)) {
           $msg = t('solr', '!title: 约 %count 条记录操作成功', array(
             '%count' => count($data),
             '!title' => $groups[$group_name]['title']
