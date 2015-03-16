@@ -1177,9 +1177,12 @@ function solr_data_import($last_timestamp, $group = NULL) {
     if (!empty($group) && $group_name != $group) {
       continue;
     }
+
     $function = $info['module'] . '_solr_data_import';
+    $last_info = solr_data_import_last_info($group_name);
+
     if (function_exists($function)) {
-      if ($data = $function($last_timestamp, $group, $last[$group_name])) {
+      if ($data = $function($last_timestamp, $group, $last_info)) {
         $solr = new solr($group_name);
         if ($solr->update($data)) {
           $msg = t('solr', '!title: 约 %count 条记录操作成功', array(
@@ -1194,6 +1197,7 @@ function solr_data_import($last_timestamp, $group = NULL) {
       }
     }
   } 
+
   custom_set('solr_data_import_last_info', $last);
   solr_data_import_last_info(0, 1);
 
