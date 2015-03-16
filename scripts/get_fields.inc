@@ -32,7 +32,7 @@ foreach ($info['fields'] as $key => $v) {
   $output .= '" indexed="true" stored="true" ';
   $output .= 'multiValued="' . (!empty($v['multiple']) ? 'true' : 'false') . '"';
   if (!empty($v['required'])) {
-    $output .= ' require="true"';
+    $output .= ' required="true"';
   }
   $output .= '/>';
   $output .= "\n";
