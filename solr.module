@@ -1174,6 +1174,8 @@ function solr_cron($last_timestamp) {
 function solr_data_import($last_timestamp, $group = NULL, $commit = true) {
   $groups = solr_get_search_group();
   $last = solr_data_import_last_info();
+  $output = array();
+
   foreach ($groups as $group_name => $info) {
     if (!empty($group) && $group_name != $group) {
       continue;
@@ -1185,7 +1187,7 @@ function solr_data_import($last_timestamp, $group = NULL, $commit = true) {
     if (function_exists($function)) {
       if ($data = $function($last_timestamp, $group, $last_info)) {
         $solr = new solr($group_name);
-        if ($solr->update($data, $commit)) {
+        if ($output[$group_name] = $solr->update($data, $commit)) {
           $msg = t('solr', '!title: 约 %count 条记录操作成功', array(
             '%count' => count($data),
             '!title' => $groups[$group_name]['title']
@@ -1202,67 +1204,7 @@ function solr_data_import($last_timestamp, $group = NULL, $commit = true) {
   custom_set('solr_data_import_last_info', $last);
   solr_data_import_last_info(0, 1);
 
-  return true;
-
-  if ($functions = module_hook_get_cache('solr_data_import')) {
-    foreach ($functions as $module => $function) {
-      if (!empty($group)) {
-        if (!isset($groups[$group])) {
-          break;
-        }
-        if ($module != $groups[$group]['module']) {
-          continue;
-        }
-      }
-      
-      if (function_exists($function)) {
-        
-        if ($result = $function($last_timestamp, $group, $last_info)) {
-          foreach ($result as $group_name => $data) {
-            
-            if (!empty($group) && $group != $group_name) {
-              continue;
-            }
-            
-            if (!var_get_key('solr', 'service_' . $group)) {
-              continue;
-            }
-            if (empty($data)) {
-              $msg = t('solr', '!title 没有需要更新的记录',  array('!title' => $groups[$group_name]['title']));
-              dd_log('solr', $msg);
-              dd_set_message($msg);
-              continue;
-            }
-            
-            if (isset($groups[$group_name])) {
-              $solr = new solr($group_name);
-              if ($solr->update($data)) {
-                $msg = t('solr', '!title: 约 %count 条记录操作成功', 
-                  array(
-                  '%count' => count($data),
-                  '!title' => $groups[$group_name]['title']
-                ));
-                dd_log('solr', $msg);
-                dd_set_message($msg);
-                $last[$group_name]['timestamp'] = time();
-                $last[$group_name]['id'] = array_pop(array_keys($data));
-                
-              }
-            } else {
-              dd_set_message(t('solr', '未定义的分组'));
-            }
-          }
-        } else {
-          $msg = t('solr', '!module 检查完毕，没有需要更新的记录',  array('!module' => $module));
-          dd_log('solr', $msg);
-          dd_set_message($msg);
-        }
-        
-      }
-    }
-    custom_set('solr_data_import_last_info', $last);
-    solr_data_import_last_info(0, 1);
-  }
+  return $output;
 }
 
 /**
