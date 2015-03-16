@@ -30,11 +30,11 @@ foreach ($info['fields'] as $key => $v) {
   $output .= '<field name="' . $key . '" type="';
   $output .= !empty($types[$v['type']]) ? $types[$v['type']] : $v['type'];
   $output .= '" indexed="true" stored="true" ';
-  $output .= 'multiValued="' . (!empty($v['multiple']) ? 'true' : 'false');
+  $output .= 'multiValued="' . (!empty($v['multiple']) ? 'true' : 'false') . '"';
   if (!empty($v['required'])) {
     $output .= ' require="true"';
   }
-  $output .= '"/>';
+  $output .= '/>';
   $output .= "\n";
 }
 
