@@ -558,7 +558,7 @@ class Solr {
     switch ($type) {
       case 'tlong': case 'int': case 'long':
         $text = preg_replace('/[^0-9]/ims', '', $text);
-      return $text;
+      return $text ? $text : 0;
       case 'tfloat': case 'float':
         if (!is_numeric($text)) {
           $text = preg_replace('/[^0-9\.]/ims', '', $text);
@@ -567,7 +567,7 @@ class Solr {
         if (substr_count($text, '.') > 1) {
           $text = str_replace('.', '', $text);
         }
-      return $text;
+      return $text ? $text : 0;
     }
 
     if (empty($this->_groupInfo['is_format'])) {
