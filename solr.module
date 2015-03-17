@@ -558,6 +558,9 @@ class Solr {
     switch ($type) {
       case 'tlong': case 'int': case 'long':
         $text = preg_replace('/[^0-9]/ims', '', $text);
+        if (strlen($text) > 18) {
+          $text = substr($text, 0, 18);
+        }
       return $text ? $text : 0;
       case 'tfloat': case 'float':
         if (!is_numeric($text)) {
@@ -568,6 +571,10 @@ class Solr {
           $text = str_replace('.', '', $text);
         } else if ($text == '.') {
           $text = 0;
+        }
+ 
+        if (strlen($text) > 18) {
+          $text = substr($text, 0, 18);
         }
       return $text ? $text : 0;
     }
