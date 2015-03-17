@@ -566,6 +566,8 @@ class Solr {
         // 小数点多于1个，全部去掉
         if (substr_count($text, '.') > 1) {
           $text = str_replace('.', '', $text);
+        } else if ($text == '.') {
+          $text = 0;
         }
       return $text ? $text : 0;
     }
