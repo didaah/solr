@@ -1184,6 +1184,7 @@ function solr_data_import($last_timestamp, $group = NULL, $commit = true) {
   $groups = solr_get_search_group();
   $last = solr_data_import_last_info();
   $output = array();
+  echo $last_timestamp;
 
   foreach ($groups as $group_name => $info) {
     if (!empty($group) && $group_name != $group) {
