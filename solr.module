@@ -676,6 +676,7 @@ function solr_update_by_id($group, $id, $doc, $commit = true) {
 
   if ($o = solr_query_by_id($group, $id, 1)) {
     $doc = array_merge((array) $o, $doc);
+    unset($doc['score']);
   }
   
   $data = array($id => array('items' => $doc));
