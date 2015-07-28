@@ -1,0 +1,19 @@
+<?php
+// $ID$
+
+/**
+ * @Implement of hook_update_X()
+ */
+function solr_install() {
+  if ($value = db_query('SELECT value FROM {custom} WHERE name = ?',
+  array('solr_data_import_last_info'), array('return' => 'column'))) {
+    db_exec('DELETE FROM {custom} WHERE name = ?', array('solr_data_import_last_info'));
+    if ($data = unserialize($value)) {
+      foreach ($data as $key => $info) {
+        custom_set('solr_data_import_last_info_' . $key, $info);
+      }
+    }
+  }
+
+  return array('DELETE FROM {custom} WHERE name = "solr_data_import_last_info"'));
+}

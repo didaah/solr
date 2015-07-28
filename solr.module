@@ -1183,7 +1183,6 @@ function solr_cron($last_timestamp) {
  */
 function solr_data_import($last_timestamp, $group = NULL, $commit = true) {
   $groups = solr_get_search_group();
-  $last = solr_data_import_last_info();
   $output = array();
 
   foreach ($groups as $group_name => $info) {
@@ -1204,15 +1203,14 @@ function solr_data_import($last_timestamp, $group = NULL, $commit = true) {
           ));
           dd_log('solr', $msg);
           dd_set_message($msg);
-          $last[$group_name]['timestamp'] = time();
-          $last[$group_name]['id'] = array_pop(array_keys($data));
+          $last_info['timestamp'] = time();
+          $last_info['id'] = array_pop(array_keys($data));
+          custom_set('solr_data_import_last_info_' . $group_name, $last_info);
+          solr_data_import_last_info($group_name, 1);
         }
       }
     }
   } 
-
-  custom_set('solr_data_import_last_info', $last);
-  solr_data_import_last_info(0, 1);
 
   return $output;
 }
@@ -1238,28 +1236,23 @@ function solr_set_data_update($group, array $data) {
 
 /**
  * 获取通过 hook_solr_data_import() 提交的更新 id 和时间
- * @param (string) $name
+ * @param string $name
  *  搜索分组名称
- * @param (array)
+ * @param array
  *  返回最后记录 id  和时间戳。请注意，若提交时记录并非 asc 排序，那么最后 id 可能并不是最大值
  */
-function solr_data_import_last_info($name = NULL, $clear = NULL) {
+function solr_data_import_last_info($name, $clear = NULL) {
   static $data;
-     
-  if (!isset($data) || !empty($clear)) {
+
+  $k = 'solr_data_import_last_info_' . $name;
+  if (!isset($data[$k]) || !empty($clear)) {
     if ($value = db_query('SELECT value FROM {custom} WHERE name = ?',
-    array('solr_data_import_last_info'), array('return' => 'column'))) {
-      $data = unserialize($value);
-    } else {
-      $data = array();
+    array($k), array('return' => 'column'))) {
+      $data[$k] = unserialize($value);
     }
   }
   
-  if (!isset($name)) {
-    return $data;
-  }
-  
-  return isset($data[$name]) ? $data[$name] : array('id' => 0, 'timestamp' => 0);
+  return isset($data[$k]) ? $data[$k] : array('id' => 0, 'timestamp' => 0);
 }
 
 /**
@@ -1274,9 +1267,8 @@ function solr_data_clear($name = NULL) {
     if ($result = $solr->deleteAll()) {
       // 触发 hook_solr_clear_data()
       module_invoke_all('solr_data_clear', $name);
-      $last = solr_data_import_last_info();
-      $last[$name] = array('id' => 0, 'timestamp' => 0);
-      custom_set('solr_data_import_last_info', $last);
+      custom_set('solr_data_import_last_info_' . $name, array('id' => 0, 'timestamp' => 0));
+      solr_data_import_last_info($name, 1);
       return $result;
     }
   }
