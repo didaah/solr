@@ -15,5 +15,5 @@ function solr_install() {
     }
   }
 
-  return array('DELETE FROM {custom} WHERE name = "solr_data_import_last_info"'));
+  return array('DELETE FROM {custom} WHERE name = "solr_data_import_last_info"');
 }
