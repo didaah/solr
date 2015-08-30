@@ -42,6 +42,13 @@ function solr_admin_settings() {
     '#default_value' => var_get_key('solr', 'keywords_service'),
     '#description' => '用做查询预处理，如：http://localhost:8983/solr/analysis/field'
   );
+   
+  $form['fields']['solr']['auto_commit_limit'] = array(
+    '#title' => '计划任务',
+    '#type' => 'textfield',
+    '#default_value' => var_get_key('solr', 'auto_commit_limit', 10),
+    '#description' => '设置每隔多少分钟运行一次索引任务，若为 0，则不运行，默认为 10'
+  );
   
   $form['fields']['solr']['default_search'] = array(
     '#type' => 'select',
